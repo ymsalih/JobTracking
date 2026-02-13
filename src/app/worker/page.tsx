@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
+import imageCompression from 'browser-image-compression'; // Kütüphane eklendi
 
 export default function WorkerPage() {
     const [tasks, setTasks] = useState<any[]>([]);
@@ -18,7 +19,6 @@ export default function WorkerPage() {
             if (!session) { router.push('/'); return; }
             setUser(session.user);
 
-            // Veritabanından şirket ismiyle beraber görevleri çekiyoruz
             const { data } = await supabase
                 .from('tasks')
                 .select('*, companies(name)')
@@ -31,7 +31,6 @@ export default function WorkerPage() {
         fetchWorkerTasks();
     }, [router]);
 
-    // Fotoğraf Seçme İşlemi
     const handleFileChange = (taskId: string, file: File) => {
         setSelectedPhotos(prev => ({ ...prev, [taskId]: file }));
     };
@@ -46,12 +45,23 @@ export default function WorkerPage() {
 
         setUploading(taskId);
         try {
-            // 1. Fotoğrafı Storage'a yükle
+            // --- FOTOĞRAF SIKIŞTIRMA MANTIĞI BAŞLANGICI ---
+            const options = {
+                maxSizeMB: 0.4,          // Dosyayı yaklaşık 400KB'a düşürür (1GB Storage için ideal)
+                maxWidthOrHeight: 1280, // HD çözünürlük korunur
+                useWebWorker: true,     // İşlemi arka planda yapar, telefonu dondurmaz
+            };
+
+            // Sıkıştırma işlemi
+            const compressedFile = await imageCompression(file, options);
+            // --- FOTOĞRAF SIKIŞTIRMA MANTIĞI BİTİŞİ ---
+
+            // 1. Sıkıştırılmış fotoğrafı Storage'a yükle
             const fileExt = file.name.split('.').pop();
             const fileName = `${taskId}-${Date.now()}.${fileExt}`;
             const { error: uploadError } = await supabase.storage
                 .from('task-photos')
-                .upload(fileName, file);
+                .upload(fileName, compressedFile); // Orijinal file yerine compressedFile kullanıldı
 
             if (uploadError) throw uploadError;
 
@@ -84,7 +94,6 @@ export default function WorkerPage() {
 
     return (
         <div className="min-h-screen bg-gray-50 pb-10 font-sans">
-            {/* ÜST PANEL */}
             <div className="bg-white border-b p-4 sticky top-0 z-30 shadow-sm flex justify-between items-center">
                 <div className="flex flex-col">
                     <h1 className="text-xl font-black text-gray-900 tracking-tighter uppercase">Görevlerim</h1>
@@ -96,14 +105,11 @@ export default function WorkerPage() {
             <div className="max-w-md mx-auto p-4 space-y-6">
                 {tasks.map(task => (
                     <div key={task.id} className={`bg-white rounded-[2.5rem] shadow-xl border-2 overflow-hidden transition-all duration-300 ${task.status === 'completed' ? 'border-green-100 opacity-90' : 'border-white'}`}>
-
-                        {/* DURUM ŞERİDİ */}
                         <div className={`h-3 w-full ${task.status === 'completed' ? 'bg-green-500' : 'bg-orange-500 animate-pulse'}`}></div>
 
                         <div className="p-6">
                             <h2 className="text-2xl font-black text-gray-900 leading-none mb-4 uppercase tracking-tight italic">{task.title}</h2>
 
-                            {/* DETAY KARTLARI */}
                             <div className="space-y-3 mb-6">
                                 <div className="flex items-center gap-4 bg-blue-50/50 p-4 rounded-2xl border border-blue-100/50">
                                     <span className="text-2xl">🏢</span>
@@ -112,38 +118,21 @@ export default function WorkerPage() {
                                         <p className="font-extrabold text-blue-900 leading-tight">{task.companies?.name}</p>
                                     </div>
                                 </div>
-
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="bg-gray-50 p-3 rounded-2xl border border-gray-100 flex flex-col">
-                                        <span className="text-[9px] font-black text-gray-400 uppercase mb-1">Müşteri</span>
-                                        <p className="text-xs font-bold text-gray-800 uppercase">{task.client_name}</p>
-                                    </div>
-                                    <div className="bg-gray-50 p-3 rounded-2xl border border-gray-100 flex flex-col">
-                                        <span className="text-[9px] font-black text-gray-400 uppercase mb-1">Telefon</span>
-                                        <a href={`tel:${task.client_phone}`} className="text-xs font-black text-blue-600 underline underline-offset-2 tracking-tighter">{task.client_phone}</a>
-                                    </div>
-                                </div>
-
                                 <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 flex items-start gap-3">
                                     <span className="text-xl">📍</span>
-                                    <div className="flex flex-col">
-                                        <span className="text-[9px] font-black text-gray-400 uppercase">Açık Adres</span>
-                                        <p className="text-xs font-bold text-gray-600 leading-relaxed italic">{task.client_address}</p>
-                                    </div>
+                                    <p className="text-xs font-bold text-gray-600 leading-relaxed italic">{task.client_address}</p>
                                 </div>
                             </div>
 
-                            {/* AKSİYON BÖLÜMÜ */}
                             {task.status === 'pending' ? (
                                 <div className="space-y-4 pt-2 border-t border-gray-100">
-                                    {/* FOTOĞRAF EKLEME ALANI */}
                                     <div className="flex flex-col gap-2">
                                         <label className="text-[10px] font-black text-gray-400 uppercase ml-2">İş Sonu Fotoğrafı</label>
                                         <label className={`relative group cursor-pointer overflow-hidden rounded-2xl border-2 border-dashed flex items-center justify-center min-h-[100px] transition-all ${selectedPhotos[task.id] ? 'border-green-300 bg-green-50' : 'border-gray-200 bg-gray-50 hover:bg-gray-100'}`}>
                                             {selectedPhotos[task.id] ? (
                                                 <div className="flex flex-col items-center gap-1">
                                                     <span className="text-2xl">📸</span>
-                                                    <span className="text-[10px] font-black text-green-600 uppercase">Fotoğraf Seçildi</span>
+                                                    <span className="text-[10px] font-black text-green-600 uppercase">Seçildi (Sıkıştırılacak)</span>
                                                 </div>
                                             ) : (
                                                 <div className="flex flex-col items-center gap-1 text-gray-400">
@@ -151,23 +140,16 @@ export default function WorkerPage() {
                                                     <span className="text-[10px] font-black uppercase">FOTOĞRAF EKLE</span>
                                                 </div>
                                             )}
-                                            <input
-                                                type="file"
-                                                accept="image/*"
-                                                capture="environment"
-                                                className="hidden"
-                                                onChange={(e) => e.target.files?.[0] && handleFileChange(task.id, e.target.files[0])}
-                                            />
+                                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => e.target.files?.[0] && handleFileChange(task.id, e.target.files[0])} />
                                         </label>
                                     </div>
 
-                                    {/* TAMAMLA BUTONU */}
                                     <button
                                         onClick={() => handleFinishTask(task.id)}
                                         disabled={uploading === task.id}
-                                        className={`w-full py-5 rounded-2xl font-black text-lg shadow-xl transition-all active:scale-95 uppercase tracking-widest ${uploading === task.id ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-green-600 text-white hover:bg-green-700 shadow-green-100'}`}
+                                        className={`w-full py-5 rounded-2xl font-black text-lg shadow-xl transition-all active:scale-95 uppercase tracking-widest ${uploading === task.id ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-green-600 text-white hover:bg-green-700'}`}
                                     >
-                                        {uploading === task.id ? 'SİSTEME İŞLENİYOR...' : 'GÖREVİ TAMAMLA ✅'}
+                                        {uploading === task.id ? 'SIKIŞTIRILIYOR VE YÜKLENİYOR...' : 'GÖREVİ TAMAMLA ✅'}
                                     </button>
                                 </div>
                             ) : (
