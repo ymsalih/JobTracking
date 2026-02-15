@@ -13,7 +13,7 @@ export default function TasksPage() {
 
     // Filtre State'leri
     const [activeFilter, setActiveFilter] = useState('all');
-    const [selectedCompanyId, setSelectedCompanyId] = useState('all'); // YENİ: Firma Filtresi
+    const [selectedCompanyId, setSelectedCompanyId] = useState('all');
 
     // Form State'leri
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -29,6 +29,7 @@ export default function TasksPage() {
 
     const fetchData = async () => {
         setLoading(true);
+        // Tüm alanları çekiyoruz (*), bu sayede product_info, serial_no, service_fee gelir.
         const { data: t } = await supabase
             .from('tasks')
             .select('*, companies(name), profiles!assigned_worker_id(full_name)')
@@ -45,16 +46,13 @@ export default function TasksPage() {
 
     useEffect(() => { fetchData(); }, []);
 
-    // GÜNCELLENMİŞ FİLTRELEME MANTIĞI: Hem Durum hem de Firma kontrol edilir
     useEffect(() => {
         let result = tasks;
 
-        // 1. Durum Filtresi
         if (activeFilter !== 'all') {
             result = result.filter(task => task.status === activeFilter);
         }
 
-        // 2. Firma Filtresi
         if (selectedCompanyId !== 'all') {
             result = result.filter(task => task.company_id === selectedCompanyId);
         }
@@ -144,14 +142,12 @@ export default function TasksPage() {
 
                 {/* FİLTRELEME ÇUBUĞU */}
                 <div className="flex flex-wrap gap-4 items-center">
-                    {/* Durum Filtreleri */}
                     <div className="flex bg-gray-100 p-1.5 rounded-2xl w-full sm:w-fit shadow-inner">
                         <button onClick={() => setActiveFilter('all')} className={`flex-1 sm:flex-none px-6 py-2 rounded-xl text-sm font-bold transition-all ${activeFilter === 'all' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Hepsi</button>
                         <button onClick={() => setActiveFilter('pending')} className={`flex-1 sm:flex-none px-6 py-2 rounded-xl text-sm font-bold transition-all ${activeFilter === 'pending' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Bekleyenler</button>
                         <button onClick={() => setActiveFilter('completed')} className={`flex-1 sm:flex-none px-6 py-2 rounded-xl text-sm font-bold transition-all ${activeFilter === 'completed' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Tamamlananlar</button>
                     </div>
 
-                    {/* YENİ: Firma Filtresi Dropdown */}
                     <div className="flex items-center gap-2 bg-gray-100 p-1.5 rounded-2xl shadow-inner border border-transparent hover:border-blue-200 transition-all">
                         <span className="text-[10px] font-black text-gray-400 uppercase ml-3 mr-1">FİRMALAR:</span>
                         <select
@@ -254,6 +250,36 @@ export default function TasksPage() {
                                 </p>
                             </div>
                         </div>
+
+                        {/* --- YENİ EKLENEN KISIM: TEKNİK & FİNANSAL DETAY (Sadece Tamamlanmışsa Görünür) --- */}
+                        {t.status === 'completed' && (
+                            <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-6 animate-in fade-in slide-in-from-top-2">
+                                {/* Teknik Bilgi Kutusu */}
+                                <div className="bg-white border-2 border-dashed border-gray-200 p-4 rounded-2xl">
+                                    <div className="flex justify-between items-center">
+                                        <div>
+                                            <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Cihaz Bilgisi</p>
+                                            <p className="text-sm font-bold text-slate-800">{t.product_info || '-'}</p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Seri No</p>
+                                            <p className="text-sm font-mono font-bold text-slate-500">{t.serial_no || '-'}</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Finansal Bilgi Kutusu (Yeşil Vurgu) */}
+                                <div className="bg-green-50 border border-green-100 p-4 rounded-2xl flex items-center justify-between">
+                                    <div>
+                                        <p className="text-[9px] font-black text-green-600 uppercase tracking-widest">Tahsilat</p>
+                                        <p className="text-xs text-green-600/70 font-medium">Kasa girişine eklendi</p>
+                                    </div>
+                                    <p className="text-3xl font-black text-green-600 tracking-tight">
+                                        {t.service_fee} ₺
+                                    </p>
+                                </div>
+                            </div>
+                        )}
 
                         {t.status === 'completed' && t.work_photo_url && (
                             <div className="mt-5 pt-5 border-t border-gray-100 animate-in fade-in slide-in-from-bottom-2">
