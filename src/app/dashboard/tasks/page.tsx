@@ -11,6 +11,9 @@ export default function TasksPage() {
     const [loading, setLoading] = useState(true);
     const [showForm, setShowForm] = useState(false);
 
+    // YENİ: Hangi görevin detayının açık olduğunu tutar
+    const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+
     // Filtre State'leri
     const [activeFilter, setActiveFilter] = useState('all');
     const [selectedCompanyId, setSelectedCompanyId] = useState('all');
@@ -29,7 +32,6 @@ export default function TasksPage() {
 
     const fetchData = async () => {
         setLoading(true);
-        // Tüm alanları çekiyoruz (*), bu sayede product_info, serial_no, service_fee gelir.
         const { data: t } = await supabase
             .from('tasks')
             .select('*, companies(name), profiles!assigned_worker_id(full_name)')
@@ -116,9 +118,20 @@ export default function TasksPage() {
     };
 
     const deleteTask = async (id: string) => {
-        if (confirm('Bu görevi silmek istediğinize emin misiniz?')) {
-            await supabase.from('tasks').delete().eq('id', id);
-            fetchData();
+        if (confirm('Bu görevi ve tüm verilerini (fotoğraf dahil) silmek istediğinize emin misiniz?')) {
+            try {
+                // Önce fotoğrafı sil (Daha önce eklediğimiz güvenli silme mantığı)
+                const { data: taskData } = await supabase.from('tasks').select('work_photo_url').eq('id', id).single();
+                if (taskData?.work_photo_url) {
+                    const fileName = taskData.work_photo_url.split('/').pop();
+                    if (fileName) await supabase.storage.from('task-photos').remove([fileName]);
+                }
+
+                await supabase.from('tasks').delete().eq('id', id);
+                fetchData();
+            } catch (error: any) {
+                alert("Silme hatası: " + error.message);
+            }
         }
     };
 
@@ -211,7 +224,7 @@ export default function TasksPage() {
             )}
 
             {/* GÖREV LİSTESİ */}
-            <div className="space-y-6">
+            <div className="space-y-4">
                 {loading ? (
                     <div className="text-center py-10 text-gray-400 font-bold animate-pulse uppercase tracking-[0.2em]">Veriler Hazırlanıyor...</div>
                 ) : filteredTasks.length === 0 ? (
@@ -219,8 +232,16 @@ export default function TasksPage() {
                         <p className="text-gray-400 font-bold italic">Seçilen kriterlere uygun görev bulunamadı.</p>
                     </div>
                 ) : filteredTasks.map(t => (
-                    <div key={t.id} className="bg-white border border-gray-100 p-6 rounded-[2rem] shadow-sm hover:shadow-xl transition-all border-l-8" style={{ borderLeftColor: t.status === 'completed' ? '#22c55e' : '#f97316' }}>
-                        <div className="flex justify-between items-start mb-4">
+                    <div
+                        key={t.id}
+                        className="bg-white border border-gray-100 rounded-[2rem] shadow-sm hover:shadow-xl transition-all border-l-8 overflow-hidden"
+                        style={{ borderLeftColor: t.status === 'completed' ? '#22c55e' : '#f97316' }}
+                    >
+                        {/* --- KART BAŞLIĞI (Her zaman görünür ve Tıklanabilir) --- */}
+                        <div
+                            onClick={() => setOpenTaskId(openTaskId === t.id ? null : t.id)}
+                            className="p-6 cursor-pointer flex justify-between items-center group"
+                        >
                             <div className="flex-1 pr-4">
                                 <div className="flex items-center gap-2 flex-wrap mb-1">
                                     <h2 className="text-xl font-black text-gray-900 leading-tight uppercase italic tracking-tight">{t.title}</h2>
@@ -230,77 +251,94 @@ export default function TasksPage() {
                                 </div>
                                 <p className="text-sm font-extrabold text-blue-600 uppercase">{t.companies?.name}</p>
                             </div>
-                            <div className="flex gap-2">
-                                <button onClick={() => toggleForm(t)} className="bg-yellow-50 text-yellow-600 px-4 py-2 rounded-xl text-xs font-black shadow-sm hover:bg-yellow-100 transition-colors">Düzenle</button>
-                                <button onClick={() => deleteTask(t.id)} className="bg-red-50 text-red-600 px-4 py-2 rounded-xl text-xs font-black shadow-sm hover:bg-red-100 transition-colors">Sil</button>
+
+                            <div className="flex items-center gap-4">
+                                {/* Aksiyon Butonları (Propagation'ı durdurmalıyız ki akordiyon tetiklenmesin) */}
+                                <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                                    <button onClick={() => toggleForm(t)} className="bg-yellow-50 text-yellow-600 px-4 py-2 rounded-xl text-xs font-black shadow-sm hover:bg-yellow-100 transition-colors">Düzenle</button>
+                                    <button onClick={() => deleteTask(t.id)} className="bg-red-50 text-red-600 px-4 py-2 rounded-xl text-xs font-black shadow-sm hover:bg-red-100 transition-colors">Sil</button>
+                                </div>
+
+                                {/* Ok İkonu */}
+                                <div className={`text-gray-300 transition-transform duration-300 transform ${openTaskId === t.id ? 'rotate-180' : ''}`}>
+                                    ▼
+                                </div>
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 border-t border-gray-50 pt-5">
-                            <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100/50">
-                                <span className="text-[9px] font-black text-gray-400 uppercase tracking-[0.1em] block mb-1">Müşteri Detay</span>
-                                <p className="text-sm font-bold text-gray-800">{t.client_name}</p>
-                                <p className="text-xs font-bold text-gray-500 mt-1 uppercase tracking-tighter italic">📍 {t.client_address}</p>
-                                <p className="text-xs font-black text-blue-700 mt-2">📞 {t.client_phone}</p>
-                            </div>
-                            <div className="bg-purple-50/30 p-4 rounded-2xl border border-purple-100/50">
-                                <span className="text-[9px] font-black text-gray-400 uppercase tracking-[0.1em] block mb-1">Sorumlu Personel</span>
-                                <p className="text-sm font-black text-purple-700 flex items-center gap-2 uppercase">
-                                    <span className="text-lg">👨‍🔧</span> {t.profiles?.full_name || 'Henüz Atanmadı'}
-                                </p>
-                            </div>
-                        </div>
-
-                        {/* --- YENİ EKLENEN KISIM: TEKNİK & FİNANSAL DETAY (Sadece Tamamlanmışsa Görünür) --- */}
-                        {t.status === 'completed' && (
-                            <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-6 animate-in fade-in slide-in-from-top-2">
-                                {/* Teknik Bilgi Kutusu */}
-                                <div className="bg-white border-2 border-dashed border-gray-200 p-4 rounded-2xl">
-                                    <div className="flex justify-between items-center">
-                                        <div>
-                                            <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Cihaz Bilgisi</p>
-                                            <p className="text-sm font-bold text-slate-800">{t.product_info || '-'}</p>
-                                        </div>
-                                        <div className="text-right">
-                                            <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Seri No</p>
-                                            <p className="text-sm font-mono font-bold text-slate-500">{t.serial_no || '-'}</p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Finansal Bilgi Kutusu (Yeşil Vurgu) */}
-                                <div className="bg-green-50 border border-green-100 p-4 rounded-2xl flex items-center justify-between">
-                                    <div>
-                                        <p className="text-[9px] font-black text-green-600 uppercase tracking-widest">Tahsilat</p>
-                                        <p className="text-xs text-green-600/70 font-medium">Kasa girişine eklendi</p>
-                                    </div>
-                                    <p className="text-3xl font-black text-green-600 tracking-tight">
-                                        {t.service_fee} ₺
-                                    </p>
-                                </div>
-                            </div>
-                        )}
-
-                        {t.status === 'completed' && t.work_photo_url && (
-                            <div className="mt-5 pt-5 border-t border-gray-100 animate-in fade-in slide-in-from-bottom-2">
-                                <div className="flex flex-col gap-3">
-                                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-2">
-                                        📷 İş Sonu Kanıt Fotoğrafı
-                                    </span>
-                                    <div className="relative group w-fit">
-                                        <a href={t.work_photo_url} target="_blank" rel="noreferrer" className="relative block">
-                                            <img
-                                                src={t.work_photo_url}
-                                                alt="İş Sonu"
-                                                className="w-32 h-32 object-cover rounded-[1.5rem] border-4 border-white shadow-lg hover:scale-105 transition-all duration-300 cursor-zoom-in"
-                                            />
-                                            <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 rounded-[1.5rem] flex items-center justify-center transition-opacity">
-                                                <span className="text-white text-[10px] font-bold uppercase">Büyüt</span>
+                        {/* --- AÇILIR DETAY ALANI (Sadece seçiliyse görünür) --- */}
+                        {openTaskId === t.id && (
+                            <div className="px-6 pb-6 pt-0 animate-in slide-in-from-top-2 duration-200">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 border-t border-gray-50 pt-5">
+                                    <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100/50">
+                                        <span className="text-[9px] font-black text-gray-400 uppercase tracking-[0.1em] block mb-1">Müşteri Detay</span>
+                                        <p className="text-sm font-bold text-gray-800">{t.client_name}</p>
+                                        <p className="text-xs font-bold text-gray-500 mt-1 uppercase tracking-tighter italic">📍 {t.client_address}</p>
+                                        <p className="text-xs font-black text-blue-700 mt-2">📞 {t.client_phone}</p>
+                                        {t.description && (
+                                            <div className="mt-2 pt-2 border-t border-gray-200">
+                                                <p className="text-[9px] font-black text-gray-400">NOT:</p>
+                                                <p className="text-xs text-gray-600 italic">{t.description}</p>
                                             </div>
-                                        </a>
+                                        )}
                                     </div>
-                                    <p className="text-[9px] font-bold text-gray-400 italic">Personel tarafından saha kanıtı olarak eklendi.</p>
+                                    <div className="bg-purple-50/30 p-4 rounded-2xl border border-purple-100/50 h-fit">
+                                        <span className="text-[9px] font-black text-gray-400 uppercase tracking-[0.1em] block mb-1">Sorumlu Personel</span>
+                                        <p className="text-sm font-black text-purple-700 flex items-center gap-2 uppercase">
+                                            <span className="text-lg">👨‍🔧</span> {t.profiles?.full_name || 'Henüz Atanmadı'}
+                                        </p>
+                                    </div>
                                 </div>
+
+                                {t.status === 'completed' && (
+                                    <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                        <div className="bg-white border-2 border-dashed border-gray-200 p-4 rounded-2xl">
+                                            <div className="flex justify-between items-center">
+                                                <div>
+                                                    <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Cihaz Bilgisi</p>
+                                                    <p className="text-sm font-bold text-slate-800">{t.product_info || '-'}</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Seri No</p>
+                                                    <p className="text-sm font-mono font-bold text-slate-500">{t.serial_no || '-'}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-green-50 border border-green-100 p-4 rounded-2xl flex items-center justify-between">
+                                            <div>
+                                                <p className="text-[9px] font-black text-green-600 uppercase tracking-widest">Tahsilat</p>
+                                                <p className="text-xs text-green-600/70 font-medium">Kasa girişine eklendi</p>
+                                            </div>
+                                            <p className="text-3xl font-black text-green-600 tracking-tight">
+                                                {t.service_fee} ₺
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {t.status === 'completed' && t.work_photo_url && (
+                                    <div className="mt-5 pt-5 border-t border-gray-100">
+                                        <div className="flex flex-col gap-3">
+                                            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                                                📷 İş Sonu Kanıt Fotoğrafı
+                                            </span>
+                                            <div className="relative group w-fit">
+                                                <a href={t.work_photo_url} target="_blank" rel="noreferrer" className="relative block">
+                                                    <img
+                                                        src={t.work_photo_url}
+                                                        alt="İş Sonu"
+                                                        className="w-32 h-32 object-cover rounded-[1.5rem] border-4 border-white shadow-lg hover:scale-105 transition-all duration-300 cursor-zoom-in"
+                                                    />
+                                                    <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 rounded-[1.5rem] flex items-center justify-center transition-opacity">
+                                                        <span className="text-white text-[10px] font-bold uppercase">Büyüt</span>
+                                                    </div>
+                                                </a>
+                                            </div>
+                                            <p className="text-[9px] font-bold text-gray-400 italic">Personel tarafından saha kanıtı olarak eklendi.</p>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
