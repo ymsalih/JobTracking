@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
-import imageCompression from 'browser-image-compression'; // Kütüphane eklendi
+import imageCompression from 'browser-image-compression';
 
 export default function WorkerPage() {
     const [tasks, setTasks] = useState<any[]>([]);
@@ -11,6 +11,12 @@ export default function WorkerPage() {
     const [loading, setLoading] = useState(true);
     const [uploading, setUploading] = useState<string | null>(null);
     const [selectedPhotos, setSelectedPhotos] = useState<{ [key: string]: File }>({});
+
+    const [productInfos, setProductInfos] = useState<{ [key: string]: string }>({});
+    const [serialNos, setSerialNos] = useState<{ [key: string]: string }>({});
+    const [serviceFees, setServiceFees] = useState<{ [key: string]: string }>({});
+
+    const [openTaskId, setOpenTaskId] = useState<string | null>(null);
     const router = useRouter();
 
     useEffect(() => {
@@ -31,58 +37,37 @@ export default function WorkerPage() {
         fetchWorkerTasks();
     }, [router]);
 
-    const handleFileChange = (taskId: string, file: File) => {
-        setSelectedPhotos(prev => ({ ...prev, [taskId]: file }));
-    };
-
-    // Görevi Fotoğrafla Beraber Tamamlama
     const handleFinishTask = async (taskId: string) => {
         const file = selectedPhotos[taskId];
-        if (!file) {
-            alert("Lütfen önce bir iş sonu fotoğrafı ekleyin.");
-            return;
-        }
+        if (!file) { alert("Lütfen iş sonu fotoğrafı ekleyin."); return; }
 
         setUploading(taskId);
         try {
-            // --- FOTOĞRAF SIKIŞTIRMA MANTIĞI BAŞLANGICI ---
-            const options = {
-                maxSizeMB: 0.4,          // Dosyayı yaklaşık 400KB'a düşürür (1GB Storage için ideal)
-                maxWidthOrHeight: 1280, // HD çözünürlük korunur
-                useWebWorker: true,     // İşlemi arka planda yapar, telefonu dondurmaz
-            };
-
-            // Sıkıştırma işlemi
-            const compressedFile = await imageCompression(file, options);
-            // --- FOTOĞRAF SIKIŞTIRMA MANTIĞI BİTİŞİ ---
-
-            // 1. Sıkıştırılmış fotoğrafı Storage'a yükle
+            const compressedFile = await imageCompression(file, { maxSizeMB: 0.4, maxWidthOrHeight: 1280 });
             const fileExt = file.name.split('.').pop();
             const fileName = `${taskId}-${Date.now()}.${fileExt}`;
-            const { error: uploadError } = await supabase.storage
-                .from('task-photos')
-                .upload(fileName, compressedFile); // Orijinal file yerine compressedFile kullanıldı
 
+            const { error: uploadError } = await supabase.storage.from('task-photos').upload(fileName, compressedFile);
             if (uploadError) throw uploadError;
 
-            // 2. URL'i al
-            const { data: { publicUrl } } = supabase.storage
-                .from('task-photos')
-                .getPublicUrl(fileName);
+            const { data: { publicUrl } } = supabase.storage.from('task-photos').getPublicUrl(fileName);
 
-            // 3. Görevi veritabanında 'completed' yap ve URL'i kaydet
             const { error: updateError } = await supabase
                 .from('tasks')
                 .update({
                     status: 'completed',
-                    work_photo_url: publicUrl
+                    work_photo_url: publicUrl,
+                    product_info: productInfos[taskId] || '',
+                    serial_no: serialNos[taskId] || '',
+                    service_fee: parseFloat(serviceFees[taskId] || '0')
                 })
                 .eq('id', taskId);
 
             if (updateError) throw updateError;
 
-            alert("Görev başarıyla tamamlandı! ✅");
+            alert("Kayıt başarıyla tamamlandı! ✅");
             setTasks(tasks.map(t => t.id === taskId ? { ...t, status: 'completed', work_photo_url: publicUrl } : t));
+            setOpenTaskId(null);
         } catch (error: any) {
             alert("Hata: " + error.message);
         } finally {
@@ -90,79 +75,125 @@ export default function WorkerPage() {
         }
     };
 
-    if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50 text-blue-600 font-bold italic">Yükleniyor...</div>;
+    if (loading) return <div className="min-h-screen flex items-center justify-center font-bold">Yükleniyor...</div>;
 
     return (
-        <div className="min-h-screen bg-gray-50 pb-10 font-sans">
-            <div className="bg-white border-b p-4 sticky top-0 z-30 shadow-sm flex justify-between items-center">
-                <div className="flex flex-col">
-                    <h1 className="text-xl font-black text-gray-900 tracking-tighter uppercase">Görevlerim</h1>
-                    <span className="text-[10px] font-bold text-blue-500 uppercase">{user?.email}</span>
-                </div>
-                <button onClick={() => supabase.auth.signOut().then(() => router.push('/'))} className="bg-red-50 text-red-600 px-4 py-2 rounded-xl text-xs font-black uppercase shadow-sm">Çıkış</button>
-            </div>
-
-            <div className="max-w-md mx-auto p-4 space-y-6">
+        <div className="min-h-screen bg-slate-50 pb-10 font-sans">
+            <div className="max-w-md mx-auto p-4 space-y-4">
                 {tasks.map(task => (
-                    <div key={task.id} className={`bg-white rounded-[2.5rem] shadow-xl border-2 overflow-hidden transition-all duration-300 ${task.status === 'completed' ? 'border-green-100 opacity-90' : 'border-white'}`}>
-                        <div className={`h-3 w-full ${task.status === 'completed' ? 'bg-green-500' : 'bg-orange-500 animate-pulse'}`}></div>
+                    <div key={task.id} className="bg-white rounded-[2.5rem] shadow-2xl border border-white overflow-hidden">
 
-                        <div className="p-6">
-                            <h2 className="text-2xl font-black text-gray-900 leading-none mb-4 uppercase tracking-tight italic">{task.title}</h2>
-
-                            <div className="space-y-3 mb-6">
-                                <div className="flex items-center gap-4 bg-blue-50/50 p-4 rounded-2xl border border-blue-100/50">
-                                    <span className="text-2xl">🏢</span>
-                                    <div className="flex flex-col">
-                                        <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">Firma & Görev</p>
-                                        <p className="font-extrabold text-blue-900 leading-tight">{task.companies?.name}</p>
-                                    </div>
-                                </div>
-                                <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 flex items-start gap-3">
-                                    <span className="text-xl">📍</span>
-                                    <p className="text-xs font-bold text-gray-600 leading-relaxed italic">{task.client_address}</p>
-                                </div>
+                        {/* GÖREV BAŞLIĞI */}
+                        <div
+                            onClick={() => task.status === 'pending' && setOpenTaskId(openTaskId === task.id ? null : task.id)}
+                            className={`p-6 cursor-pointer flex justify-between items-center ${task.status === 'completed' ? 'bg-green-50' : 'bg-white'}`}
+                        >
+                            <div className="flex flex-col">
+                                <span className="text-[10px] font-black text-blue-600 uppercase tracking-tighter mb-1">
+                                    {task.companies?.name}
+                                </span>
+                                <h2 className="text-xl font-black text-slate-900 uppercase leading-none italic">
+                                    {task.title}
+                                </h2>
                             </div>
+                            <span className="text-2xl">{task.status === 'completed' ? '✅' : (openTaskId === task.id ? '➖' : '➕')}</span>
+                        </div>
 
-                            {task.status === 'pending' ? (
-                                <div className="space-y-4 pt-2 border-t border-gray-100">
-                                    <div className="flex flex-col gap-2">
-                                        <label className="text-[10px] font-black text-gray-400 uppercase ml-2">İş Sonu Fotoğrafı</label>
-                                        <label className={`relative group cursor-pointer overflow-hidden rounded-2xl border-2 border-dashed flex items-center justify-center min-h-[100px] transition-all ${selectedPhotos[task.id] ? 'border-green-300 bg-green-50' : 'border-gray-200 bg-gray-50 hover:bg-gray-100'}`}>
-                                            {selectedPhotos[task.id] ? (
-                                                <div className="flex flex-col items-center gap-1">
-                                                    <span className="text-2xl">📸</span>
-                                                    <span className="text-[10px] font-black text-green-600 uppercase">Seçildi (Sıkıştırılacak)</span>
-                                                </div>
-                                            ) : (
-                                                <div className="flex flex-col items-center gap-1 text-gray-400">
-                                                    <span className="text-3xl">➕</span>
-                                                    <span className="text-[10px] font-black uppercase">FOTOĞRAF EKLE</span>
-                                                </div>
-                                            )}
-                                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => e.target.files?.[0] && handleFileChange(task.id, e.target.files[0])} />
-                                        </label>
-                                    </div>
+                        {/* DETAY VE FORM PANELİ */}
+                        {(openTaskId === task.id || task.status === 'completed') && (
+                            <div className="px-6 pb-6 space-y-6">
 
-                                    <button
-                                        onClick={() => handleFinishTask(task.id)}
-                                        disabled={uploading === task.id}
-                                        className={`w-full py-5 rounded-2xl font-black text-lg shadow-xl transition-all active:scale-95 uppercase tracking-widest ${uploading === task.id ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-green-600 text-white hover:bg-green-700'}`}
-                                    >
-                                        {uploading === task.id ? 'SIKIŞTIRILIYOR VE YÜKLENİYOR...' : 'GÖREVİ TAMAMLA ✅'}
-                                    </button>
-                                </div>
-                            ) : (
-                                <div className="pt-4 border-t border-gray-100">
-                                    <div className="relative rounded-2xl overflow-hidden border-4 border-green-50 shadow-inner">
-                                        <img src={task.work_photo_url} alt="Tamamlanan İş" className="w-full h-40 object-cover grayscale-[30%]" />
-                                        <div className="absolute inset-0 bg-green-900/40 flex items-center justify-center backdrop-blur-[2px]">
-                                            <span className="bg-white text-green-700 px-6 py-2 rounded-full text-xs font-black shadow-2xl uppercase tracking-tighter">İŞ TAMAMLANDI</span>
+                                {/* YÖNETİCİ BİLGİLERİ (KOYU VE OKUNAKLI) */}
+                                <div className="bg-slate-100/50 rounded-3xl p-5 space-y-4 border border-slate-100">
+                                    <div className="flex items-start gap-3">
+                                        <span className="text-lg">📍</span>
+                                        <div>
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Adres</p>
+                                            <p className="text-sm font-extrabold text-slate-800 leading-tight italic">{task.client_address}</p>
                                         </div>
                                     </div>
+                                    <div className="flex items-start gap-3">
+                                        <span className="text-lg">👤</span>
+                                        <div>
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Müşteri</p>
+                                            <p className="text-sm font-extrabold text-slate-900 uppercase">{task.client_name}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-start gap-3">
+                                        <span className="text-lg">📞</span>
+                                        <div>
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Telefon</p>
+                                            <a href={`tel:${task.client_phone}`} className="text-sm font-black text-blue-700 underline underline-offset-2">{task.client_phone}</a>
+                                        </div>
+                                    </div>
+                                    <div className="pt-3 border-t border-slate-200">
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Yönetici Notu</p>
+                                        <p className="text-xs font-bold text-slate-600 italic">"{task.description}"</p>
+                                    </div>
                                 </div>
-                            )}
-                        </div>
+
+                                {task.status === 'pending' ? (
+                                    <div className="space-y-4">
+                                        {/* PERSONEL GİRİŞLERİ (KOYU PLACEHOLDER) */}
+                                        <div className="space-y-3">
+                                            <input
+                                                placeholder="Ürün Bilgisi (Örn: Bosch Klima)"
+                                                className="w-full p-4 rounded-2xl border-0 bg-white shadow-md text-sm font-black text-slate-800 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500 outline-none"
+                                                onChange={(e) => setProductInfos({ ...productInfos, [task.id]: e.target.value })}
+                                            />
+                                            <input
+                                                placeholder="Seri Numarası"
+                                                className="w-full p-4 rounded-2xl border-0 bg-white shadow-md text-sm font-black text-slate-800 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500 outline-none"
+                                                onChange={(e) => setSerialNos({ ...serialNos, [task.id]: e.target.value })}
+                                            />
+                                            <div className="relative">
+                                                <input
+                                                    type="number"
+                                                    placeholder="Hizmet Ücreti"
+                                                    className="w-full p-4 pl-12 rounded-2xl border-0 bg-white shadow-md text-sm font-black text-green-700 placeholder:text-green-300 focus:ring-2 focus:ring-green-500 outline-none"
+                                                    onChange={(e) => setServiceFees({ ...serviceFees, [task.id]: e.target.value })}
+                                                />
+                                                <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-green-600 text-lg">₺</span>
+                                            </div>
+                                        </div>
+
+                                        {/* FOTOĞRAF ALANI */}
+                                        <label className="cursor-pointer group flex flex-col items-center justify-center p-8 bg-white border-2 border-dashed border-slate-200 rounded-3xl hover:border-blue-400 hover:bg-blue-50 transition-all">
+                                            <span className="text-4xl mb-2 group-hover:scale-110 transition-transform">📸</span>
+                                            <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest">
+                                                {selectedPhotos[task.id] ? "FOTOĞRAF SEÇİLDİ ✔" : "İŞ SONU FOTOĞRAFI EKLE"}
+                                            </span>
+                                            <input type="file" accept="image/*" capture="environment" className="hidden"
+                                                onChange={(e) => e.target.files?.[0] && setSelectedPhotos({ ...selectedPhotos, [task.id]: e.target.files[0] })}
+                                            />
+                                        </label>
+
+                                        <button
+                                            onClick={() => handleFinishTask(task.id)}
+                                            disabled={uploading === task.id}
+                                            className="w-full py-5 bg-blue-600 text-white rounded-[1.5rem] font-black text-lg shadow-xl shadow-blue-100 hover:bg-blue-700 active:scale-95 transition-all uppercase tracking-tighter"
+                                        >
+                                            {uploading === task.id ? 'VERİLER İŞLENİYOR...' : 'GÖREVİ TAMAMLA ✅'}
+                                        </button>
+                                    </div>
+                                ) : (
+                                    /* TAMAMLANAN ÖZET */
+                                    <div className="pt-4 border-t border-slate-100 space-y-4">
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="bg-white p-3 rounded-2xl border border-slate-100">
+                                                <p className="text-[9px] font-black text-slate-400 uppercase">Ürün / Seri</p>
+                                                <p className="text-xs font-bold text-slate-800">{task.product_info} / {task.serial_no}</p>
+                                            </div>
+                                            <div className="bg-white p-3 rounded-2xl border border-slate-100 flex flex-col items-end">
+                                                <p className="text-[9px] font-black text-slate-400 uppercase">Tahsilat</p>
+                                                <p className="text-sm font-black text-green-600">{task.service_fee} ₺</p>
+                                            </div>
+                                        </div>
+                                        <img src={task.work_photo_url} className="w-full h-48 object-cover rounded-3xl border-4 border-white shadow-lg" />
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 ))}
             </div>
